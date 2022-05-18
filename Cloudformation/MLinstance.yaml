@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to Create an EC2 instance in a VPC
+   
+Parameters:
+  InstanceType:
+    Type: String
+    Description: Choosing g3s.xlarge because of availability
+    Default: g3s.xlarge
+
+Mappings:
+  RegionAMIMap:
+    us-east-1:
+      UbuntuLinux: ami-02474d947ebba3566
+    us-east-2:
+      UbuntuLinux: ami-04cfb10451d76d289
+    us-west-1:
+      UbuntuLinux: ami-027be456e3593dc56
+    ap-southeast-1:
+      UbuntuLinux: ami-00060f9a0a7e860f4
+    ap-southeast-2:
+      UbuntuLinux: ami-04127782f880636ca 
+    ap-northeast-1:
+      UbuntuLinux: ami-087de4994d2dea822
+    eu-west-2:
+      UbuntuLinux: ami-0155a4b783ffa58ce
+  RegionVPCMap:
+    us-east-1:
+      InstanceVPC: vpc-efbbee95
+    us-east-2:
+      InstanceVPC: vpc-7a996911
+    us-west-1:
+      InstanceVPC: vpc-c1b25ca7
+    ap-southeast-1:
+      InstanceVPC: vpc-56415c31
+    ap-southeast-2:
+      InstanceVPC: vpc-bbf9f8dc
+    ap-northeast-1:
+       InstanceVPC: vpc-8eefe0e9
+    eu-west-2:
+      InstanceVPC: vpc-9c4d09f4
+  RegionSubnetMap:
+    us-east-1:
+      InstanceSubnet: subnet-bfcff6d8
+    us-east-2:
+      InstanceSubnet: subnet-f93c2491
+    us-west-1:
+      InstanceSubnet: subnet-9bae77fd
+    ap-southeast-1:
+      InstanceSubnet: subnet-1f12d479
+    ap-southeast-2:
+      InstanceSubnet: subnet-1f0c1656
+    ap-northeast-1:
+      InstanceSubnet: subnet-0ec30b46
+
+    eu-west-2:
+      InstanceSubnet: subnet-748b010e
+  RegionKeypairMap:
+    us-east-1:
+      InstanceKey: PratyushTrends
+    us-east-2:
+      InstanceKey: GPU_Key_Ohio
+    us-west-1:
+      InstanceKey: PratyushTrends2
+    ap-southeast-1:
+      InstanceKey: GPU_Singapore
+    ap-southeast-2:
+      InstanceKey: GPU_Sydney
+    ap-northeast-1:
+      InstanceKey: GPU_Tokyo
+
+    eu-west-2:
+      InstanceKey: GPU_London
+    
+Resources:
+  DemoInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties: 
+      ImageId: !FindInMap [RegionAMIMap, !Ref 'AWS::Region', UbuntuLinux]
+      InstanceType: !Ref InstanceType
+      BlockDeviceMappings:
+        -
+          DeviceName: "/dev/sda1"
+          Ebs:
+            VolumeSize: 130
+            VolumeType: gp3
+      KeyName: !FindInMap [RegionKeypairMap, !Ref 'AWS::Region', InstanceKey]
+      SecurityGroupIds: 
+        - !Ref DemoSecurityGroup
+      SubnetId: !FindInMap [RegionSubnetMap, !Ref 'AWS::Region', InstanceSubnet]
+      UserData:
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash
+            username=DOCKER
+            password=$username@007
+            useradd $username -m -d /home/$username
+            echo "$username:$password" | sudo chpasswd
+            echo $password | passwd --stdin $username
+            file=/etc/ssh/sshd_config
+            cp -p $file $file.old &&
+            awk '
+            $1=="PasswordAuthentication" {$2="yes"}
+            {print}
+            ' $file.old > $file
+            apt-get update
+            apt-get install curl
+            #curl -fsSL https://get.docker.com/ | sh
+            systemctl start  docker
+            docker run hello-world
+            groupadd docker && sudo usermod -aG docker $username
+            systemctl enable docker
+            apt install nodejs
+            apt install git
+            apt install npm
+            apt install xauth
+            file=/etc/ssh/sshd_config
+            cp -p $file $file.old &&
+            awk '
+            $1=="X11Forwarding" {$2="yes"}
+            {print}
+            ' $file.old > $file
+            systemctl restart sshd.service
+            echo $USER >> /tmp/setup.sh
+            echo '#!/bin/bash -e' >> /tmp/setup.sh
+            echo 'sudo apt-get update -y' >> /tmp/setup.sh
+            echo 'sudo apt install ubuntu-mate-desktop -y' >> /tmp/setup.sh
+            echo 'sudo apt install tightvncserver -y' >> /tmp/setup.sh
+
+            echo '#!/bin/bash' >> /tmp/xstartup
+            echo 'unset DBUS_SESSION_BUS_ADDRESS'  >> /tmp/xstartup
+            echo '[ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup' >> /tmp/xstartup
+            echo '[ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources' >> /tmp/xstartup
+            echo 'xsetroot -solid gre'  >> /tmp/xstartup
+            echo 'vncconfig -iconic &' >> /tmp/xstartup
+            echo 'x-terminal-emulator -geometry 80x24+10+10 -ls -title "$VNCDESKTOP Desktop" &'  >> /tmp/xstartup
+            echo 'x-window-manager &' >> /tmp/xstartup
+            echo 'mate-session &' >> /tmp/xstartup
+            echo 'cp /tmp/xstartup /home/ubuntu/.vnc/' >> /tmp/setup.sh
+            echo 'chmod u+x  /home/ubuntu/.vnc/xstartup' >> /tmp/setup.sh
+            echo 'vncserver -kill :1 >> /tmp/vnckill.log' >> /tmp/setup.sh
+            echo 'vncserver :1' >> /tmp/setup.sh 
+            echo 'echo -e "awsadmin"' >> /tmp/setup.sh
+            sh /tmp/setup.sh >> /tmp/setup.log
+                      
+  DemoSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: !FindInMap [RegionVPCMap, !Ref 'AWS::Region', InstanceVPC]
+      GroupDescription: SG to allow SSH access via port 22
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: Name
+          Value: SSH-SG
+
+Outputs:
+  DemoInstanceId:
+    Description: Instance Id 
+    Value: !Ref DemoInstance
+
+
